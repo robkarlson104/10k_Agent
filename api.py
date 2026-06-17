@@ -8,4 +8,3 @@ cik_df = pd.read_table(sec_cik)
 
 print(cik_df)
 
-
