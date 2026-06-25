@@ -13,7 +13,11 @@ Flow per ticker:
 import os
 import io
 import time
+import warnings
 import requests
+from bs4 import XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 import pandas as pd
 import voyageai
 import psycopg2.extras
