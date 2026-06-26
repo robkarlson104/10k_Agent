@@ -1,10 +1,9 @@
 """
-agent.py — LangChain ReAct agent for querying S&P 500 10-K filings.
+agent.py — LangChain agent for querying S&P 500 10-K filings.
 
-The agent uses a ReAct (Reasoning + Acting) loop to decide which tools to call
-and in what order. Conversation memory lets it reference earlier turns in the
-same session — e.g. "compare that to what you found for Apple" or "now look at
-the IFRS treatment for the same topic."
+Uses LangChain 1.x create_agent (tool-calling loop) backed by LangGraph.
+Conversation memory is provided via MemorySaver — all turns in the same
+session share a thread_id so the agent can reference prior context.
 
 Tools available to the agent:
   - search_filings: semantic search across all filings (optional ticker/section filter)
@@ -18,14 +17,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain.memory import ConversationBufferWindowMemory
-from langchain_core.prompts import PromptTemplate
+from langchain.agents import create_agent
+from langgraph.checkpoint.memory import MemorySaver
 from tools import TOOLS
+from audit import init_audit_tables, create_session, close_session, AuditCallbackHandler
 
 load_dotenv(dotenv_path=Path(__file__).parent / '.env')
 
-# Prompt template — must include {tools}, {tool_names}, {chat_history}, {input}, {agent_scratchpad}
 SYSTEM_PROMPT: str = """You are an expert financial analyst assistant specializing in SEC 10-K filings.
 You have access to a database of S&P 500 10-K filings from 2024-2025.
 
@@ -45,42 +43,18 @@ How to approach questions:
 - For technical accounting analysis, use accounting_analysis — pass filing excerpts in the context field
 - Chain tools together when needed: search first, then pass results to accounting_analysis for deeper reasoning
 - Always cite the specific company, filing date, and section when referencing filing information
-- Always cite the specific ASC topic or IFRS standard when referencing accounting guidance
-
-You have access to the following tools:
-
-{tools}
-
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question, with citations
-
-Previous conversation:
-{chat_history}
-
-Begin!
-
-Question: {input}
-Thought:{agent_scratchpad}"""
+- Always cite the specific ASC topic or IFRS standard when referencing accounting guidance"""
 
 
-def build_agent() -> AgentExecutor:
+def build_agent():
     """
-    Assemble and return a LangChain AgentExecutor with conversation memory.
+    Assemble and return a LangChain 1.x agent graph with conversation memory.
 
-    Memory is a sliding window of the last 10 exchanges so the agent can
-    reference prior turns without the context growing unbounded.
-    handle_parsing_errors recovers gracefully if the LLM output format slips.
+    Memory is persisted via MemorySaver checkpointer — each session uses a
+    thread_id so the agent retains context across turns within that session.
 
     Returns:
-        A ready-to-invoke AgentExecutor with memory attached.
+        A compiled StateGraph ready to invoke.
     """
     llm = ChatAnthropic(
         model="claude-sonnet-4-6",
@@ -89,53 +63,64 @@ def build_agent() -> AgentExecutor:
         max_tokens=4096,
     )
 
-    prompt = PromptTemplate.from_template(SYSTEM_PROMPT)
+    init_audit_tables()
 
-    agent = create_react_agent(
-        llm=llm,
+    return create_agent(
+        model=llm,
         tools=TOOLS,
-        prompt=prompt,
-    )
-
-    # Keep the last 10 conversation turns in memory — enough for a session
-    # without blowing up the context window on long research sessions
-    memory = ConversationBufferWindowMemory(
-        memory_key="chat_history",
-        k=10,
-        return_messages=False,  # plain text format, compatible with the PromptTemplate above
-    )
-
-    return AgentExecutor(
-        agent=agent,
-        tools=TOOLS,
-        memory=memory,
-        verbose=True,
-        max_iterations=8,
-        handle_parsing_errors=True,
+        system_prompt=SYSTEM_PROMPT,
+        checkpointer=MemorySaver(),
     )
 
 
-def run_agent(question: str, agent_executor: AgentExecutor) -> str:
+def run_agent(question: str, agent, thread_id: str = "default") -> str:
     """
-    Run a single question through the agent and return the final answer.
-
-    Memory is stored on the AgentExecutor instance, so prior turns are
-    automatically included in each subsequent invocation.
+    Stream a question through the agent, printing tool calls and observations
+    as they happen, then return the final answer.
 
     Args:
         question: The user's natural language question about 10-K filings.
-        agent_executor: A pre-built AgentExecutor from build_agent().
+        agent: A compiled agent graph from build_agent().
+        thread_id: Session identifier for conversation continuity.
 
     Returns:
-        The agent's final synthesized answer as a string.
+        The agent's final answer as a string.
     """
-    result: dict = agent_executor.invoke({"input": question})
-    return result["output"]
+    session_id = create_session(thread_id, question)
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": [AuditCallbackHandler(session_id)],
+    }
+    final_answer = ""
+
+    for chunk in agent.stream(
+        {"messages": [{"role": "user", "content": question}]},
+        config=config,
+        stream_mode="updates",
+    ):
+        for node, updates in chunk.items():
+            messages = updates.get("messages", [])
+            for msg in messages:
+                # Tool call being made
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        print(f"[Calling tool: {tc['name']}]")
+                # Tool result coming back
+                elif hasattr(msg, "type") and msg.type == "tool":
+                    print(f"[Tool result received from: {msg.name}]")
+                # Final AI response — capture any non-tool AI message
+                elif hasattr(msg, "content") and msg.content:
+                    if getattr(msg, "type", "") not in ("tool", "human"):
+                        if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                            final_answer = msg.content
+
+    close_session(session_id, final_answer)
+    return final_answer
 
 
 if __name__ == "__main__":
     print("Building 10-K analyst agent...")
-    executor: AgentExecutor = build_agent()
+    executor = build_agent()
     print("Agent ready. Type 'quit' to exit.\n")
 
     while True:

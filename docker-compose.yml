@@ -3,6 +3,7 @@ services:
     image: pgvector/pgvector:pg17
     container_name: pgvector-db
     environment:
+      # Local dev credentials only — change these if deploying outside localhost
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: tenk_rag

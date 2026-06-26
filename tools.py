@@ -8,16 +8,18 @@ user's question. Tools are composable — the agent can call multiple in sequenc
 
 import os
 import io
+import time
 import requests
 import voyageai
 import pandas as pd
 import psycopg2.extras
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain.tools import StructuredTool
+from langchain_core.tools import StructuredTool
 from duckduckgo_search import DDGS
 from schemas import SearchFilingsInput, CompareCompaniesInput, SectorPracticesInput, SearchAccountingStandardsInput, AccountingAnalysisInput, FilingChunk
 from accounting_skill import run_accounting_analysis
+from audit import log_db_query
 from db import get_connection
 
 load_dotenv(dotenv_path=Path(__file__).parent / '.env')
@@ -101,53 +103,55 @@ def search_filings(query: str, ticker: str | None = None, section: str | None = 
     """
     embedding: list[float] = _embed_query(query)
 
+    sql: str
+    params: tuple
+
+    if ticker and section:
+        sql = """
+            SELECT ticker, filed_date, section, content
+            FROM filings
+            WHERE ticker = %s AND section = %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s"""
+        params = (ticker.upper(), section, embedding, n_results)
+    elif ticker:
+        sql = """
+            SELECT ticker, filed_date, section, content
+            FROM filings
+            WHERE ticker = %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s"""
+        params = (ticker.upper(), embedding, n_results)
+    elif section:
+        sql = """
+            SELECT ticker, filed_date, section, content
+            FROM filings
+            WHERE section = %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s"""
+        params = (section, embedding, n_results)
+    else:
+        sql = """
+            SELECT ticker, filed_date, section, content
+            FROM filings
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s"""
+        params = (embedding, n_results)
+
     with get_connection() as conn:
         with conn.cursor() as cur:
-            if ticker and section:
-                cur.execute(
-                    """
-                    SELECT ticker, filed_date, section, content
-                    FROM filings
-                    WHERE ticker = %s AND section = %s
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (ticker.upper(), section, embedding, n_results)
-                )
-            elif ticker:
-                cur.execute(
-                    """
-                    SELECT ticker, filed_date, section, content
-                    FROM filings
-                    WHERE ticker = %s
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (ticker.upper(), embedding, n_results)
-                )
-            elif section:
-                cur.execute(
-                    """
-                    SELECT ticker, filed_date, section, content
-                    FROM filings
-                    WHERE section = %s
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (section, embedding, n_results)
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT ticker, filed_date, section, content
-                    FROM filings
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (embedding, n_results)
-                )
+            t0 = time.perf_counter()
+            cur.execute(sql, params)
             rows = cur.fetchall()
+            duration_ms = int((time.perf_counter() - t0) * 1000)
 
+    log_db_query(
+        sql,
+        {"query": query, "ticker": ticker, "section": section, "n_results": n_results},
+        len(rows),
+        "search_filings",
+        duration_ms,
+    )
     return _format_chunks(rows)
 
 
@@ -169,21 +173,27 @@ def compare_companies(query: str, tickers: list[str], n_results_per_company: int
     """
     embedding: list[float] = _embed_query(query)
     all_parts: list[str] = []
+    sql = """
+        SELECT ticker, filed_date, section, content
+        FROM filings
+        WHERE ticker = %s
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s"""
 
     with get_connection() as conn:
         with conn.cursor() as cur:
             for ticker in tickers:
-                cur.execute(
-                    """
-                    SELECT ticker, filed_date, section, content
-                    FROM filings
-                    WHERE ticker = %s
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (ticker.upper(), embedding, n_results_per_company)
-                )
+                t0 = time.perf_counter()
+                cur.execute(sql, (ticker.upper(), embedding, n_results_per_company))
                 rows = cur.fetchall()
+                duration_ms = int((time.perf_counter() - t0) * 1000)
+                log_db_query(
+                    sql,
+                    {"query": query, "ticker": ticker, "n_results": n_results_per_company},
+                    len(rows),
+                    "compare_companies",
+                    duration_ms,
+                )
                 if rows:
                     all_parts.append(f"=== {ticker.upper()} ===\n{_format_chunks(rows)}")
                 else:
@@ -221,21 +231,27 @@ def get_sector_practices(query: str, sector: str, n_results: int = 10) -> str:
         return f"No tickers found for sector '{sector}'. Check the sector name is a valid GICS sector."
 
     embedding: list[float] = _embed_query(query)
+    sql = """
+        SELECT ticker, filed_date, section, content
+        FROM filings
+        WHERE ticker = ANY(%s)
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s"""
 
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT ticker, filed_date, section, content
-                FROM filings
-                WHERE ticker = ANY(%s)
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (sector_tickers, embedding, n_results)
-            )
+            t0 = time.perf_counter()
+            cur.execute(sql, (sector_tickers, embedding, n_results))
             rows = cur.fetchall()
+            duration_ms = int((time.perf_counter() - t0) * 1000)
 
+    log_db_query(
+        sql,
+        {"query": query, "sector": sector, "sector_ticker_count": len(sector_tickers), "n_results": n_results},
+        len(rows),
+        "get_sector_practices",
+        duration_ms,
+    )
     header: str = f"Results from {len(sector_tickers)} '{sector}' sector companies:\n\n"
     return header + _format_chunks(rows)
 
