@@ -17,7 +17,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable
 
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 # System prompt establishes the accounting expert persona with specific knowledge domains
 ACCOUNTING_SYSTEM_PROMPT: str = """You are a Big 4 accounting expert with deep knowledge of:
@@ -64,14 +64,16 @@ def build_accounting_chain() -> Runnable:
     llm = ChatAnthropic(
         model="claude-sonnet-4-6",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        temperature=0,      # deterministic for technical accounting analysis
-        max_tokens=2048,    # longer than general agent responses — accounting explanations can be detailed
+        temperature=0,  # deterministic for technical accounting analysis
+        max_tokens=2048,  # longer than general agent responses — accounting explanations can be detailed
     )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", ACCOUNTING_SYSTEM_PROMPT),
-        ("human", "{query}\n\n{context_block}"),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", ACCOUNTING_SYSTEM_PROMPT),
+            ("human", "{query}\n\n{context_block}"),
+        ]
+    )
 
     output_parser = StrOutputParser()
 
@@ -94,6 +96,8 @@ def run_accounting_analysis(query: str, context: str = "") -> str:
     chain: Runnable = build_accounting_chain()
 
     # Format the context block so the prompt reads naturally whether context is provided or not
-    context_block: str = f"Relevant filing excerpts or data to analyze:\n\n{context}" if context else ""
+    context_block: str = (
+        f"Relevant filing excerpts or data to analyze:\n\n{context}" if context else ""
+    )
 
     return chain.invoke({"query": query, "context_block": context_block})

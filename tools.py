@@ -17,12 +17,19 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.tools import StructuredTool
 from duckduckgo_search import DDGS
-from schemas import SearchFilingsInput, CompareCompaniesInput, SectorPracticesInput, SearchAccountingStandardsInput, AccountingAnalysisInput, FilingChunk
+from schemas import (
+    SearchFilingsInput,
+    CompareCompaniesInput,
+    SectorPracticesInput,
+    SearchAccountingStandardsInput,
+    AccountingAnalysisInput,
+    FilingChunk,
+)
 from accounting_skill import run_accounting_analysis
 from audit import log_db_query
 from db import get_connection
 
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 voyage: voyageai.Client = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
 
@@ -45,7 +52,7 @@ def _get_sector_map() -> dict[str, str]:
 
     resp = requests.get(
         SP500_WIKI_URL,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; 10k-agent/1.0)"}
+        headers={"User-Agent": "Mozilla/5.0 (compatible; 10k-agent/1.0)"},
     )
     resp.raise_for_status()
     tables: list[pd.DataFrame] = pd.read_html(io.StringIO(resp.text))
@@ -84,7 +91,12 @@ def _format_chunks(rows: list[tuple]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def search_filings(query: str, ticker: str | None = None, section: str | None = None, n_results: int = 8) -> str:
+def search_filings(
+    query: str,
+    ticker: str | None = None,
+    section: str | None = None,
+    n_results: int = 8,
+) -> str:
     """
     Perform a semantic search across all ingested 10-K filings.
 
@@ -155,7 +167,9 @@ def search_filings(query: str, ticker: str | None = None, section: str | None = 
     return _format_chunks(rows)
 
 
-def compare_companies(query: str, tickers: list[str], n_results_per_company: int = 3) -> str:
+def compare_companies(
+    query: str, tickers: list[str], n_results_per_company: int = 3
+) -> str:
     """
     Compare how multiple companies handle a specific accounting topic or metric.
 
@@ -189,15 +203,23 @@ def compare_companies(query: str, tickers: list[str], n_results_per_company: int
                 duration_ms = int((time.perf_counter() - t0) * 1000)
                 log_db_query(
                     sql,
-                    {"query": query, "ticker": ticker, "n_results": n_results_per_company},
+                    {
+                        "query": query,
+                        "ticker": ticker,
+                        "n_results": n_results_per_company,
+                    },
                     len(rows),
                     "compare_companies",
                     duration_ms,
                 )
                 if rows:
-                    all_parts.append(f"=== {ticker.upper()} ===\n{_format_chunks(rows)}")
+                    all_parts.append(
+                        f"=== {ticker.upper()} ===\n{_format_chunks(rows)}"
+                    )
                 else:
-                    all_parts.append(f"=== {ticker.upper()} ===\nNo data found for this ticker.")
+                    all_parts.append(
+                        f"=== {ticker.upper()} ===\nNo data found for this ticker."
+                    )
 
     return "\n\n".join(all_parts)
 
@@ -223,8 +245,7 @@ def get_sector_practices(query: str, sector: str, n_results: int = 10) -> str:
 
     # Find tickers that belong to the requested sector
     sector_tickers: list[str] = [
-        ticker for ticker, s in sector_map.items()
-        if s.lower() == sector.lower()
+        ticker for ticker, s in sector_map.items() if s.lower() == sector.lower()
     ]
 
     if not sector_tickers:
@@ -247,7 +268,12 @@ def get_sector_practices(query: str, sector: str, n_results: int = 10) -> str:
 
     log_db_query(
         sql,
-        {"query": query, "sector": sector, "sector_ticker_count": len(sector_tickers), "n_results": n_results},
+        {
+            "query": query,
+            "sector": sector,
+            "sector_ticker_count": len(sector_tickers),
+            "n_results": n_results,
+        },
         len(rows),
         "get_sector_practices",
         duration_ms,
@@ -256,7 +282,9 @@ def get_sector_practices(query: str, sector: str, n_results: int = 10) -> str:
     return header + _format_chunks(rows)
 
 
-def search_accounting_standards(query: str, standard: str = "both", n_results: int = 5) -> str:
+def search_accounting_standards(
+    query: str, standard: str = "both", n_results: int = 5
+) -> str:
     """
     Search GAAP and/or IFRS accounting standards using DuckDuckGo scoped to authoritative sources.
 

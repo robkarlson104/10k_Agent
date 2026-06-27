@@ -27,10 +27,10 @@ from bs4 import BeautifulSoup
 from psycopg2.extensions import connection as PgConnection
 from db import get_connection, init_db
 
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 # SEC requires a descriptive User-Agent identifying who is making requests
-SEC_HEADERS: dict[str, str] = {'User-Agent': os.getenv("SEC_EMAIL")}
+SEC_HEADERS: dict[str, str] = {"User-Agent": os.getenv("SEC_EMAIL")}
 
 voyage: voyageai.Client = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
 
@@ -58,7 +58,7 @@ def get_sp500_tickers() -> list[str]:
     """
     resp = requests.get(
         SP500_WIKI_URL,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; 10k-agent/1.0)"}
+        headers={"User-Agent": "Mozilla/5.0 (compatible; 10k-agent/1.0)"},
     )
     resp.raise_for_status()
     tables: list[pd.DataFrame] = pd.read_html(io.StringIO(resp.text))
@@ -104,7 +104,9 @@ def get_10k_filing(cik: str) -> dict | None:
     accessions: list[str] = filings.get("accessionNumber", [])
     primary_docs: list[str] = filings.get("primaryDocument", [])
 
-    for form, date, accession, primary_doc in zip(forms, dates, accessions, primary_docs):
+    for form, date, accession, primary_doc in zip(
+        forms, dates, accessions, primary_docs
+    ):
         if form == "10-K" and (date.startswith("2024") or date.startswith("2025")):
             # Folder uses accession without dashes; filename is the primaryDocument
             accession_no_dashes: str = accession.replace("-", "")
@@ -129,10 +131,25 @@ def parse_sections(html: str) -> list[dict[str, str]]:
 
     # Standard 10-K section headings defined by SEC Regulation S-K
     section_markers: list[str] = [
-        "Item 1.", "Item 1A.", "Item 1B.", "Item 2.", "Item 3.",
-        "Item 4.", "Item 5.", "Item 6.", "Item 7.", "Item 7A.",
-        "Item 8.", "Item 9.", "Item 9A.", "Item 10.", "Item 11.",
-        "Item 12.", "Item 13.", "Item 14.", "Item 15.",
+        "Item 1.",
+        "Item 1A.",
+        "Item 1B.",
+        "Item 2.",
+        "Item 3.",
+        "Item 4.",
+        "Item 5.",
+        "Item 6.",
+        "Item 7.",
+        "Item 7A.",
+        "Item 8.",
+        "Item 9.",
+        "Item 9A.",
+        "Item 10.",
+        "Item 11.",
+        "Item 12.",
+        "Item 13.",
+        "Item 14.",
+        "Item 15.",
     ]
 
     sections: list[dict[str, str]] = []
@@ -143,7 +160,9 @@ def parse_sections(html: str) -> list[dict[str, str]]:
         matched = next((m for m in section_markers if line.strip().startswith(m)), None)
         if matched:
             if current_lines:
-                sections.append({"section": current_section, "text": "\n".join(current_lines)})
+                sections.append(
+                    {"section": current_section, "text": "\n".join(current_lines)}
+                )
             current_section = matched
             current_lines = [line]
         else:
@@ -182,7 +201,7 @@ def embed_chunks(chunks: list[str]) -> list[list[float]]:
     all_embeddings: list[list[float]] = []
     batch_size: int = 64
     for i in range(0, len(chunks), batch_size):
-        batch: list[str] = chunks[i:i + batch_size]
+        batch: list[str] = chunks[i : i + batch_size]
         result = voyage.embed(batch, model="voyage-finance-2", input_type="document")
         all_embeddings.extend(result.embeddings)
     return all_embeddings
@@ -214,7 +233,7 @@ def store_chunks(
                 (ticker, cik, filed_date, section, i, chunk, embedding)
                 for i, (chunk, embedding) in enumerate(zip(chunks, embeddings))
             ],
-            template="(%s, %s, %s, %s, %s, %s, %s::vector)"
+            template="(%s, %s, %s, %s, %s, %s, %s::vector)",
         )
     conn.commit()
 
@@ -249,7 +268,9 @@ def process_ticker(ticker: str, cik: str, conn: PgConnection) -> None:
         if not chunks:
             continue
         embeddings: list[list[float]] = embed_chunks(chunks)
-        store_chunks(conn, ticker, cik, filing["date"], sec["section"], chunks, embeddings)
+        store_chunks(
+            conn, ticker, cik, filing["date"], sec["section"], chunks, embeddings
+        )
         total_chunks += len(chunks)
 
     print(f"  [{ticker}] done — {total_chunks} chunks stored.")

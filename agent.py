@@ -22,7 +22,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from tools import TOOLS
 from audit import init_audit_tables, create_session, close_session, AuditCallbackHandler
 
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 SYSTEM_PROMPT: str = """You are an expert financial analyst assistant specializing in SEC 10-K filings.
 You have access to a database of S&P 500 10-K filings from 2024-2025.

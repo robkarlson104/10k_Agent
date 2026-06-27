@@ -9,7 +9,7 @@ import os
 import psycopg2
 from psycopg2.extensions import connection as PgConnection
 
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 POSTGRES_URL: str = os.getenv("POSTGRES_URL")
 

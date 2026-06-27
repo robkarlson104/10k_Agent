@@ -12,10 +12,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from db import get_connection
 
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 voyage: voyageai.Client = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
-claude: anthropic.Anthropic = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+claude: anthropic.Anthropic = anthropic.Anthropic(
+    api_key=os.getenv("ANTHROPIC_API_KEY")
+)
 
 # Number of chunks to retrieve from pgvector per query
 TOP_K: int = 8
@@ -45,7 +47,7 @@ def retrieve(query: str, ticker: str | None = None) -> list[dict]:
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (ticker.upper(), query_embedding, TOP_K)
+                    (ticker.upper(), query_embedding, TOP_K),
                 )
             else:
                 cur.execute(
@@ -55,7 +57,7 @@ def retrieve(query: str, ticker: str | None = None) -> list[dict]:
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (query_embedding, TOP_K)
+                    (query_embedding, TOP_K),
                 )
             rows = cur.fetchall()
 
@@ -74,7 +76,9 @@ def build_context(chunks: list[dict]) -> str:
     """
     parts: list[str] = []
     for c in chunks:
-        parts.append(f"[{c['ticker']} | {c['filed_date']} | {c['section']}]\n{c['content']}")
+        parts.append(
+            f"[{c['ticker']} | {c['filed_date']} | {c['section']}]\n{c['content']}"
+        )
     return "\n\n---\n\n".join(parts)
 
 
@@ -106,7 +110,7 @@ Question: {question}"""
     message = claude.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
     )
     return message.content[0].text
 
@@ -114,7 +118,9 @@ Question: {question}"""
 if __name__ == "__main__":
     print("10-K RAG ready. Type 'quit' to exit.")
     while True:
-        ticker_input: str | None = input("\nFilter by ticker (or press Enter for all): ").strip() or None
+        ticker_input: str | None = (
+            input("\nFilter by ticker (or press Enter for all): ").strip() or None
+        )
         question: str = input("Question: ").strip()
         if question.lower() == "quit":
             break

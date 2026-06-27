@@ -121,7 +121,14 @@ def log_db_query(
                         (session_id, tool_name, sql, params, rows_returned, duration_ms)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (session_id, tool_name, sql.strip(), params_str, rows_returned, duration_ms),
+                    (
+                        session_id,
+                        tool_name,
+                        sql.strip(),
+                        params_str,
+                        rows_returned,
+                        duration_ms,
+                    ),
                 )
             conn.commit()
     except Exception:
